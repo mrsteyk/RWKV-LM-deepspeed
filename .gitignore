@@ -1,0 +1,7 @@
+*.pyc
+venv
+__pycache__
+
+lightning_logs
+*.pth
+*.npy
