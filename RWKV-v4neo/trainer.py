@@ -2,9 +2,11 @@ import argparse
 import deepspeed
 import os
 import torch
+import torch.utils.data
 from torch.utils.data import DataLoader
 from pytorch_lightning import Trainer
 from pytorch_lightning.utilities import rank_zero_info
+from pytorch_lightning.callbacks import DeviceStatsMonitor, ModelCheckpoint
 
 import dataset
 import lr_warmup
@@ -134,10 +136,26 @@ if __name__ == "__main__":
         args.vocab_size = new_vocab_size
 
     lr_meme = lr_warmup.LearningWarmUpCallback(args)
+    device_stats = DeviceStatsMonitor(cpu_stats=True)
+    val_loss_checkpointing = ModelCheckpoint(
+        filename="epoch-{epoch:02d}-val_loss-{val_loss:.2f}",
+        # save_on_train_epoch_end=True,
+        # save_weights_only=True,
+        save_top_k=3,
+        mode='min',
+        monitor="val_loss",
+    )
+    epoch_checkpointing = ModelCheckpoint(
+        filename="epoch-{epoch:02d}",
+        save_on_train_epoch_end=True,
+        save_top_k=2,
+        mode='max',
+        monitor="epoch",
+    )
 
     trainer = Trainer.from_argparse_args(
         args,
-        callbacks=[lr_meme],
+        callbacks=[lr_meme, device_stats, val_loss_checkpointing, epoch_checkpointing],
     )
     if "deepspeed" in args.strategy:
         trainer.strategy.config["zero_optimization"]["allgather_bucket_size"] = args.allgather_bucket_size * 1e6
@@ -145,7 +163,18 @@ if __name__ == "__main__":
     rank_zero_info(trainer.strategy.config)
 
     train_data = dataset.MyDataSet(args)
-    # data_loader = DataLoader(train_data, shuffle=False, pin_memory=True, batch_size=args.batch_size, num_workers=1, persistent_workers=False, drop_last=True)
-    data_loader = DataLoader(train_data, shuffle=True, pin_memory=True, batch_size=args.batch_size)
 
-    trainer.fit(model, data_loader)
+    # TODO(mrsteyk): Allow different validation files
+    # use 20% of training data for validation
+    train_set_size = int(len(train_data) * 0.8)
+    valid_set_size = len(train_data) - train_set_size
+
+    # split the train set into two
+    seed = torch.Generator().manual_seed(42)
+    train_data, valid_data = torch.utils.data.random_split(train_data, [train_set_size, valid_set_size], generator=seed)
+
+    # data_loader = DataLoader(train_data, shuffle=False, pin_memory=True, batch_size=args.batch_size, num_workers=1, persistent_workers=False, drop_last=True)
+    train_loader = DataLoader(train_data, shuffle=True, pin_memory=True, batch_size=args.batch_size)
+    valid_loader = DataLoader(valid_data, shuffle=False, pin_memory=True, batch_size=args.batch_size)
+
+    trainer.fit(model, train_loader, valid_loader)
