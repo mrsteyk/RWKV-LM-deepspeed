@@ -8,6 +8,8 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.utilities import rank_zero_info
 from pytorch_lightning.callbacks import DeviceStatsMonitor, ModelCheckpoint
 
+from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint
+
 import dataset
 import lr_warmup
 
@@ -38,6 +40,11 @@ def get_argparser():
         "--batch_size",
         type=int,
         default=1,
+    )
+    parser.add_argument(
+        "--load_model_cont",
+        type=str,
+        default='',
     )
 
     # Original
@@ -121,7 +128,10 @@ if __name__ == "__main__":
     model = M.RWKV(args)
     # model = None
 
-    if args.load_model_init != '':
+    if args.load_model_cont != '':
+        # load_state_dict_from_zero_checkpoint(model, args.load_model_cont)
+        pass
+    elif args.load_model_init != '':
         d = torch.load(args.load_model_init, map_location='cpu')
         model.load_state_dict(d)
         # model = M.RWKV(args).load_from_checkpoint(args.load_model_init)
@@ -144,13 +154,15 @@ if __name__ == "__main__":
         save_top_k=3,
         mode='min',
         monitor="val_loss",
+        auto_insert_metric_name=False,
     )
     epoch_checkpointing = ModelCheckpoint(
         filename="epoch-{epoch:02d}",
         save_on_train_epoch_end=True,
-        save_top_k=2,
+        save_top_k=1,
         mode='max',
         monitor="epoch",
+        auto_insert_metric_name=False,
     )
 
     trainer = Trainer.from_argparse_args(
@@ -177,4 +189,4 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_data, shuffle=True, pin_memory=True, batch_size=args.batch_size)
     valid_loader = DataLoader(valid_data, shuffle=False, pin_memory=True, batch_size=args.batch_size)
 
-    trainer.fit(model, train_loader, valid_loader)
+    trainer.fit(model, train_loader, valid_loader, ckpt_path=args.load_model_cont if args.load_model_cont != ''  else None)
