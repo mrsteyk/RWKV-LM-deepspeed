@@ -274,6 +274,8 @@ class RWKV(pl.LightningModule):
             self.head_q = nn.Linear(args.n_embd, args.head_qk, bias=False)
             self.head_k = nn.Linear(args.n_embd, args.head_qk, bias=False)
             self.register_buffer("copy_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len)))
+        
+        self.emb_hotswap = False # Use that for prefix-/prompt-tune with hotswapping
 
     # def configure_sharded_model(self) -> None:
     #     """
@@ -308,6 +310,14 @@ class RWKV(pl.LightningModule):
 
     def configure_optimizers(self):
         args = self.args
+
+        if args.soft_emb_tune:
+            optim_groups = []
+            for p in self.parameters():
+                if p.requires_grad:
+                    optim_groups.append({"params": p, "weight_decay": 0.0})
+            return DeepSpeedCPUAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adamw_mode=False, weight_decay=0, amsgrad=False)
+
         if args.layerwise_lr:
             lr_1x = set()
             lr_2x = set()
@@ -343,7 +353,7 @@ class RWKV(pl.LightningModule):
     def forward(self, idx):
         args = self.args
         B, T = idx.size()
-        assert T <= args.ctx_len, "Cannot forward, model ctx_len is exhausted."
+        assert T <= args.ctx_len or self.emb_hotswap, "Cannot forward, model ctx_len is exhausted."
 
         x = self.emb(idx)
         x_emb = None if args.tiny_att_dim > 0 else x

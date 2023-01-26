@@ -12,6 +12,7 @@ from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint
 
 import dataset
 import lr_warmup
+from soft_embedding_hotswap import SoftEmbedding
 
 def get_argparser():
     parser = argparse.ArgumentParser()
@@ -45,6 +46,16 @@ def get_argparser():
         "--load_model_cont",
         type=str,
         default='',
+    )
+    parser.add_argument(
+        "--soft_emb_tune",
+        action='store_true',
+        default=False,
+    )
+    parser.add_argument(
+        "--soft_emb_tokens",
+        type=int,
+        default=10,
     )
 
     # Original
@@ -121,19 +132,27 @@ if __name__ == "__main__":
         os.environ["RWKV_FLOAT_MODE"] = "fp16"
     else:
         os.environ["RWKV_FLOAT_MODE"] = str(args.precision)
-    os.environ["RWKV_T_MAX"] = str(args.ctx_len)
+    os.environ["RWKV_T_MAX"] = str(args.ctx_len + args.soft_emb_tokens if args.soft_emb_tune else 0)
 
     # Now we can import the model after setting that stupid T max envvar
     import model as M
     model = M.RWKV(args)
     # model = None
 
-    if args.load_model_cont != '':
+    if args.load_model_cont != '' and not args.soft_emb_tune:
         # load_state_dict_from_zero_checkpoint(model, args.load_model_cont)
         pass
     elif args.load_model_init != '':
-        d = torch.load(args.load_model_init, map_location='cpu')
-        model.load_state_dict(d)
+        if os.path.isdir(args.load_model_init):
+            load_state_dict_from_zero_checkpoint(model, args.load_model_init)
+            model.cpu()
+            if args.precision == 16:
+                model.half()
+            elif args.precision == "bf16":
+                model.bfloat16()
+        else:
+            d = torch.load(args.load_model_init, map_location='cpu')
+            model.load_state_dict(d)
         # model = M.RWKV(args).load_from_checkpoint(args.load_model_init)
     else:
         # TODO?
@@ -144,6 +163,16 @@ if __name__ == "__main__":
         new_vocab_size = args.vocab_size + args.vocab_size_delta
         model.resize_emb(new_vocab_size)
         args.vocab_size = new_vocab_size
+    
+    if args.soft_emb_tune:
+        # meme hard, die young
+        print("### буду погибать молодым/малоДЫМ(а)")
+        args.layerwise_lr = False
+        for p in model.parameters():
+            p.requires_grad = False
+        model.emb_hotswap = True
+        assert args.soft_emb_tokens < args.vocab_size, "Soft Embedding can't eat more than the `emb`"
+        model.emb = SoftEmbedding(model.emb, n_tokens=args.soft_emb_tokens, initialize_from_vocab=True)
 
     lr_meme = lr_warmup.LearningWarmUpCallback(args)
     device_stats = DeviceStatsMonitor(cpu_stats=True)

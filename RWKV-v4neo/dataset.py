@@ -25,4 +25,6 @@ class MyDataSet(Dataset):
     
     def __getitem__(self, index):
         dix = self.data_split[index]
+        if self.args.soft_emb_tune:
+            return torch.tensor(np.concatenate(([-100]*self.args.soft_emb_tokens, dix[:-1])), dtype=torch.long), torch.tensor(np.concatenate(([-100]*self.args.soft_emb_tokens, dix[1:])), dtype=torch.long)
         return torch.tensor(dix[:-1], dtype=torch.long), torch.tensor(dix[1:], dtype=torch.long)
