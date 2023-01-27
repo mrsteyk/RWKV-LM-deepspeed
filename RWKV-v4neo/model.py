@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import pytorch_lightning as pl
 import deepspeed
-from deepspeed.ops.adam import DeepSpeedCPUAdam
+from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 from pytorch_lightning.utilities import rank_zero_info
 
 # from deepspeed.runtime.fp16.onebit.zoadam import ZeroOneAdam
@@ -348,7 +348,10 @@ class RWKV(pl.LightningModule):
                 {"params": [p for n, p in self.named_parameters()], "weight_decay": 0.0},
             ]
 
-        return DeepSpeedCPUAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adamw_mode=False, weight_decay=0, amsgrad=False)
+        if "deepspeed" in args.strategy and "offload" in args.strategy:
+            return DeepSpeedCPUAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adamw_mode=False, weight_decay=0, amsgrad=False)
+        else:
+            return FusedAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adam_w_mode=False, weight_decay=0, amsgrad=False)
 
     def forward(self, idx):
         args = self.args
