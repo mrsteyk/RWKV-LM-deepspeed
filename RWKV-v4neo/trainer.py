@@ -132,7 +132,7 @@ if __name__ == "__main__":
         os.environ["RWKV_FLOAT_MODE"] = "fp16"
     else:
         os.environ["RWKV_FLOAT_MODE"] = str(args.precision)
-    os.environ["RWKV_T_MAX"] = str(args.ctx_len + args.soft_emb_tokens if args.soft_emb_tune else 0)
+    os.environ["RWKV_T_MAX"] = str(args.ctx_len + (args.soft_emb_tokens if args.soft_emb_tune else 0))
 
     # Now we can import the model after setting that stupid T max envvar
     import model as M
@@ -152,6 +152,8 @@ if __name__ == "__main__":
                 model.bfloat16()
         else:
             d = torch.load(args.load_model_init, map_location='cpu')
+            if list(d.keys())[0].startswith("_forward_module."):
+                d = {n[len("_forward_module."):]: d[n] for n in d.keys()}
             model.load_state_dict(d)
         # model = M.RWKV(args).load_from_checkpoint(args.load_model_init)
     else:
