@@ -107,7 +107,7 @@ if __name__ == "__main__":
         os.environ["RWKV_FLOAT_MODE"] = "fp16"
     else:
         os.environ["RWKV_FLOAT_MODE"] = str(args.precision)
-    os.environ["RWKV_T_MAX"] = str(args.ctx_len + args.soft_emb_tokens if args.soft_emb_tune else 0)
+    os.environ["RWKV_T_MAX"] = str(args.ctx_len + (args.soft_emb_tokens if args.soft_emb_tune else 0))
 
     # Now we can import the model after setting that stupid T max envvar
     import model as M
@@ -120,6 +120,8 @@ if __name__ == "__main__":
             model = model.cpu()
         else:
             d = torch.load(args.load_model_init, map_location='cpu')
+            if list(d.keys())[0].startswith("_forward_module."):
+                d = {n[len("_forward_module."):]: d[n] for n in d.keys()}
             model.load_state_dict(d)
         # model = M.RWKV(args).load_from_checkpoint(args.load_model_init)
     else:
@@ -150,7 +152,7 @@ if __name__ == "__main__":
                 state_dict = torch.load(args.soft_emb_checkpoint, map_location='cpu')
             print(state_dict.keys())
             #model.emb.learned_embedding = state_dict["_forward_module.emb.learned_embedding"]
-            model.load_state_dict(state_dict, strict=False)
+            model.load_state_dict({"emb.learned_embedding": state_dict["_forward_module.emb.learned_embedding"]}, strict=False)
     
     if args.precision == 16:
         model = model.half()
@@ -164,7 +166,6 @@ if __name__ == "__main__":
         model = model.cpu()
     
     print("!!! WARNING: THIS IS A MAKESHIFT INFERENCE SCRIPT! !!!")
-    print("--- --- ---")
     model.freeze()
     tokenizer = PreTrainedTokenizerFast(tokenizer_file='../20B_tokenizer_openchatgpt.json')
     context = """quality: high
@@ -176,50 +177,59 @@ Assistant is a distilled language model trained by the community.<|STK_SP|>
 <|STK_SP|>
 
 [User]
-Can you explain quantum computing<|STK_SP|>
+Can you explain quantum computing?<|STK_SP|>
 
 [Assistant]
 """
-    tokens = tokenizer(context, return_tensors="pt").input_ids
-    tokens = torch.cat([torch.full((1,args.soft_emb_tokens), -100), tokens], 1)
-    tokens = tokens.to(model.device)
+    tokens_src = tokenizer(context, return_tensors="pt").input_ids
+    tokens_src = torch.cat([torch.full((1,args.soft_emb_tokens), -100), tokens_src], 1) if args.soft_emb_tune else tokens_src
+    tokens_src = tokens_src.to(model.device)
     # for n, p in model.named_parameters():
     #     print(n, p.device)
     # TODO(mrrsteyk): this looks dumb
     MIN_LEN = 100
     EOS = 0
     END = 50277
-    for i in range(767):
-        logits = model(tokens).float()
-        logits = logits.view(-1, logits.size(-1))
-        logits = logits[-1] # ???
-        # print(logits, logits.shape)
-        
-        if True:
-            probs = torch.nn.functional.softmax(logits, dim=-1)
-            # print(probs, probs.shape)
+    TRIALS = 1
+    for _ in range(TRIALS):
+        print("--- --- ---")
+        tokens = tokens_src.clone()
+        for i in range(767):
+            logits = model(tokens).float()
+            logits = logits.view(-1, logits.size(-1))
+            logits = logits[-1] # ???
+            # print(logits, logits.shape)
             
-            sorted_probs = torch.sort(probs, descending=True)[0]
-            # print("sorted", sorted_probs, sorted_probs.shape)
+            if False:
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                # print(probs, probs.shape)
+                
+                sorted_probs = torch.sort(probs, descending=True)[0]
+                # print("sorted", sorted_probs, sorted_probs.shape)
 
-            cumulative_probs = torch.cumsum(sorted_probs, dim=-1).cpu().numpy()
-            cutoff = float(sorted_probs[np.argmax(cumulative_probs > 0.95)])
-            probs[probs < cutoff] = 0
-            # print("cut probs", probs, probs.shape)
-            if i < MIN_LEN:
-                probs[EOS] = 0
-                probs[END] = 0
+                cumulative_probs = torch.cumsum(sorted_probs, dim=-1).cpu().numpy()
+                cutoff = float(sorted_probs[np.argmax(cumulative_probs > 0.99)])
+                probs[probs < cutoff] = 0
+                # print("cut probs", probs, probs.shape)
+                if True:
+                    probs[EOS] = 0
+                if i < MIN_LEN:
+                    probs[EOS] = 0
+                    probs[END] = 0
+                
+                try:
+                    out = torch.multinomial(probs.float(), num_samples=1)[0]
+                except:
+                    out = EOS
+                # print(out, out.shape)
+            else:
+                out = torch.argmax(logits)
             
-            out = torch.multinomial(probs.float(), num_samples=1)[0]
-            # print(out, out.shape)
-        else:
-            out = torch.argmax(logits)
-        
-        if out == EOS:
-            print("<|BAD|>", end='')
-        if out == EOS or out == END:
-            break
-        tokens = torch.cat([tokens, torch.full((1, 1), out, device=tokens.device, dtype=tokens.dtype)], 1)
-        print(tokenizer.decode(out), end='', flush=True)
-        # break
-    print()
+            if out == EOS:
+                print("<|BAD|>", end='')
+            if out == EOS or out == END:
+                break
+            tokens = torch.cat([tokens, torch.full((1, 1), out, device=tokens.device, dtype=tokens.dtype)], 1)
+            print(tokenizer.decode(out), end='', flush=True)
+            # break
+        print()
