@@ -293,7 +293,7 @@ class RWKV(pl.LightningModule):
         
         n = min(self.args.vocab_size, new_tokens)
         
-        rank_zero_info("### Start emb copy", new_embed.weight.size(), self.emb.weight.size())
+        rank_zero_info("### Start emb copy %s %s", new_embed.weight.size(), self.emb.weight.size())
         new_embed.weight.data[:n, :] = self.emb.weight.data[:n, :]
         self.emb = new_embed
         rank_zero_info("### emb copy end")
@@ -303,7 +303,7 @@ class RWKV(pl.LightningModule):
         new_head.to(self.head.weight.device, dtype=self.head.weight.dtype)
         nn.init.orthogonal_(new_head.weight, gain=1 * 0.5)
 
-        rank_zero_info("### Start head copy", new_head.weight.size(), self.head.weight.size())
+        rank_zero_info("### Start head copy %s %s", new_head.weight.size(), self.head.weight.size())
         new_head.weight.data[:n, :] = self.head.weight.data[:n, :]
         self.head = new_head
         rank_zero_info("### RESIZE END")
