@@ -360,10 +360,16 @@ class RWKV(pl.LightningModule):
 
         if args.tiny_att_dim > 0:
             for block in self.blocks:
-                x = deepspeed.checkpointing.checkpoint(block, x, x_emb)
+                if self.training:
+                    x = deepspeed.checkpointing.checkpoint(block, x, x_emb)
+                else:
+                    x = block(x, x_emb)
         else:
             for block in self.blocks:
-                x = deepspeed.checkpointing.checkpoint(block, x)
+                if self.training:
+                    x = deepspeed.checkpointing.checkpoint(block, x)
+                else:
+                    x = block(x)
         
         x = self.ln_out(x)
 
