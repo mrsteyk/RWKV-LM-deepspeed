@@ -3,7 +3,7 @@
 import argparse
 import os
 import torch
-# import numpy as np
+import numpy as np
 
 from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint, get_fp32_state_dict_from_zero_checkpoint
 
@@ -176,7 +176,7 @@ Assistant is a distilled language model trained by the community.<|STK_SP|>
 <|STK_SP|>
 
 [User]
-Riddle me this Batman: who exactly were in Paris?<|STK_SP|>
+Can you explain quantum computing<|STK_SP|>
 
 [Assistant]
 """
@@ -186,29 +186,38 @@ Riddle me this Batman: who exactly were in Paris?<|STK_SP|>
     # for n, p in model.named_parameters():
     #     print(n, p.device)
     # TODO(mrrsteyk): this looks dumb
-    for _ in range(767):
+    MIN_LEN = 100
+    EOS = 0
+    END = 50277
+    for i in range(767):
         logits = model(tokens).float()
         logits = logits.view(-1, logits.size(-1))
         logits = logits[-1] # ???
         # print(logits, logits.shape)
         
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        # print(probs, probs.shape)
-        
-        sorted_probs = torch.sort(probs, descending=True)[0]
-        # print("sorted", sorted_probs, sorted_probs.shape)
+        if True:
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            # print(probs, probs.shape)
+            
+            sorted_probs = torch.sort(probs, descending=True)[0]
+            # print("sorted", sorted_probs, sorted_probs.shape)
 
-        cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-        cutoff = float(sorted_probs[torch.argmax(cumulative_probs)])
-        probs[probs < cutoff] = 0
-        # print("cut probs", probs, probs.shape)
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1).cpu().numpy()
+            cutoff = float(sorted_probs[np.argmax(cumulative_probs > 0.95)])
+            probs[probs < cutoff] = 0
+            # print("cut probs", probs, probs.shape)
+            if i < MIN_LEN:
+                probs[EOS] = 0
+                probs[END] = 0
+            
+            out = torch.multinomial(probs.float(), num_samples=1)[0]
+            # print(out, out.shape)
+        else:
+            out = torch.argmax(logits)
         
-        out = torch.multinomial(probs.float(), num_samples=1)[0]
-        # print(out, out.shape)
-        
-        if out == 0:
+        if out == EOS:
             print("<|BAD|>", end='')
-        if out == 0 or out == 50277:
+        if out == EOS or out == END:
             break
         tokens = torch.cat([tokens, torch.full((1, 1), out, device=tokens.device, dtype=tokens.dtype)], 1)
         print(tokenizer.decode(out), end='', flush=True)
