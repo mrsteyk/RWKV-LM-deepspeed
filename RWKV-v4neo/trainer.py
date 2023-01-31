@@ -18,6 +18,11 @@ def get_argparser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--experiment_fp16",
+        action='store_true',
+        default=False,
+    )
+    parser.add_argument(
         "--vocab_size_delta",
         type=int,
         default=0,
@@ -133,6 +138,8 @@ if __name__ == "__main__":
     else:
         os.environ["RWKV_FLOAT_MODE"] = str(args.precision)
     os.environ["RWKV_T_MAX"] = str(args.ctx_len + (args.soft_emb_tokens if args.soft_emb_tune else 0))
+
+    os.environ["RWKVK_CUDA_FP16"] = "1" if args.experiment_fp16 else "0"
 
     # Now we can import the model after setting that stupid T max envvar
     import model as M
