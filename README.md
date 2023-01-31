@@ -1,6 +1,6 @@
 # RWKV-LM mrsteyk's """fork"""
 
-This was originally supposed to be `RWKV-LM/RWKV-v4neo` with Microsoft's DeepSpeed oriented codebase, but it grew up to be my ground for experiments.
+This was originally supposed to be `RWKV-LM/RWKV-v4neo` with Microsoft's DeepSpeed oriented codebase, but it never became that and then grew up to be my ground for experiments.
 
 # [Check out and star the original](https://github.com/BlinkDL/RWKV-LM)
 
