@@ -113,10 +113,10 @@ def get_args():
 def inference_rnn(args):
     os.environ["RWKV_JIT_ON"] = "1" if args.precision != 16 else "0"
     args.RUN_DEVICE = "cpu" if args.accelerator != "gpu" else "cuda"
-    args.FLOAT_MODE = "fp32" if args.precision == 32 else "fp16" if args.precision == 16 else "bf16"
+    args.FLOAT_MODE = "fp32" if args.precision == "32" else "fp16" if args.precision == 16 else "bf16"
     os.environ["RWKV_RUN_DEVICE"] = args.RUN_DEVICE
 
-    print(args.RUN_DEVICE, args.FLOAT_MODE)
+    print(args.RUN_DEVICE, args.FLOAT_MODE, args.precision)
 
     import model_run as M
     model = M.RWKV_RNN(args)
