@@ -18,6 +18,11 @@ def get_argparser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--experiment_dataloader",
+        action='store_true',
+        default=False,
+    )
+    parser.add_argument(
         "--experiment_fp16",
         action='store_true',
         default=False,
@@ -186,21 +191,23 @@ if __name__ == "__main__":
     lr_meme = lr_warmup.LearningWarmUpCallback(args)
     device_stats = DeviceStatsMonitor(cpu_stats=True)
     val_loss_checkpointing = ModelCheckpoint(
-        filename="epoch-{epoch:02d}-val_loss-{val_loss:.2f}",
+        filename="epoch-{epoch:02d}-step-{step:03d}-val_loss-{val_loss:.2f}",
         # save_on_train_epoch_end=True,
         # save_weights_only=True,
         save_top_k=3,
         mode='min',
         monitor="val_loss",
         auto_insert_metric_name=False,
+        every_n_train_steps=None if not args.experiment_dataloader else 300,
     )
     epoch_checkpointing = ModelCheckpoint(
-        filename="epoch-{epoch:02d}",
+        filename="epoch-{epoch:02d}-step-{step:03d}",
         save_on_train_epoch_end=True,
         save_top_k=1,
         mode='max',
         monitor="epoch",
         auto_insert_metric_name=False,
+        every_n_train_steps=None if not args.experiment_dataloader else 300,
     )
 
     trainer = Trainer.from_argparse_args(
