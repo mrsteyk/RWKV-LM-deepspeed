@@ -17,6 +17,11 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--greedy",
+        action='store_true',
+        default=False,
+    )
+    parser.add_argument(
         "--experiment_rnn",
         action='store_true',
         default=False,
@@ -185,15 +190,15 @@ Can you explain quantum computing?<|STK_SP|>
 
     print("### Preprocess initial context!")
     ctx_src = tokenizer.encode(context)
-    for i in range(len(ctx_src) - 1):
-        state = model.forward_optimised(ctx_src[i], state, preprocess_only=True)
+    for i in ctx_src[:-1]:
+        state = model.forward_optimised(i, state, preprocess_only=True)
     logits_src, state_src = model.forward(ctx_src, state, preprocess_only=False)
     print("### Finished preprocessing initial context!")
 
     MIN_LEN = 100
     EOS = 0
     END = 50277
-    TRIALS = 1
+    TRIALS = 1 if args.greedy else 3
     for _ in range(TRIALS):
         print("--- --- ---")
         # ctx = copy.deepcopy(ctx_src)
@@ -204,7 +209,7 @@ Can you explain quantum computing?<|STK_SP|>
         torch.cuda.empty_cache()
 
         for i in range(767):
-            if False:
+            if not args.greedy:
                 probs = torch.nn.functional.softmax(logits, dim=-1)
                 # print(probs, probs.shape)
                 
@@ -339,7 +344,7 @@ Can you explain quantum computing?<|STK_SP|>
     MIN_LEN = 100
     EOS = 0
     END = 50277
-    TRIALS = 1
+    TRIALS = 1 if args.greedy else 3
     for _ in range(TRIALS):
         print("--- --- ---")
         tokens = tokens_src.clone()
@@ -349,7 +354,7 @@ Can you explain quantum computing?<|STK_SP|>
             logits = logits[-1] # ???
             # print(logits, logits.shape)
             
-            if False:
+            if not args.greedy:
                 probs = torch.nn.functional.softmax(logits, dim=-1)
                 # print(probs, probs.shape)
                 
