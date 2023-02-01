@@ -1,0 +1,1 @@
+python inference.py --vocab_size 50277 --vocab_size_delta 1 --load_model_init "../../RWKV-LM/RWKV-v4neo/RWKV-4-Pile-430M-20220808-8066.pth" --ctx_len 1024 --n_layer 24 --n_embd 1024 --head_qk 0 --accelerator gpu --precision 16
