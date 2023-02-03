@@ -17,6 +17,21 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--alpha_frequency",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--alpha_presence",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--temp",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
         "--greedy",
         action='store_true',
         default=False,
@@ -110,6 +125,13 @@ def get_args():
 
     return parser.parse_args()
 
+def alpha_sample(logits, counter, alpha_frequency=0.0, alpha_presence=0.0):
+    d = logits.device
+    logits = logits.cpu()
+    for i in range(logits.shape[0]):
+        logits[i] -= counter[i] * alpha_frequency + float(counter[i] > 0) * alpha_presence
+    return logits.to(d)
+
 def inference_rnn(args):
     os.environ["RWKV_JIT_ON"] = "1" if args.precision != 16 else "0"
     args.RUN_DEVICE = "cpu" if args.accelerator != "gpu" else "cuda"
@@ -198,18 +220,23 @@ Can you explain quantum computing?<|STK_SP|>
     MIN_LEN = 100
     EOS = 0
     END = 50277
-    TRIALS = 1 if args.greedy else 3
+    TRIALS = 1 if args.greedy or args.temp == 0 else 3
     for _ in range(TRIALS):
         print("--- --- ---")
         # ctx = copy.deepcopy(ctx_src)
         logits = logits_src.clone()
         state = copy.deepcopy(state_src)
 
+        counter = [0] * args.vocab_size
+
         gc.collect()
         torch.cuda.empty_cache()
 
         for i in range(767):
-            if not args.greedy:
+            if args.alpha_frequency != 0 or args.alpha_presence != 0:
+                logits = alpha_sample(logits, counter, alpha_frequency=args.alpha_frequency, alpha_presence=args.alpha_presence)
+
+            if not args.greedy and args.temp != 0:
                 probs = torch.nn.functional.softmax(logits, dim=-1)
                 # print(probs, probs.shape)
                 
@@ -225,6 +252,9 @@ Can you explain quantum computing?<|STK_SP|>
                 if i < MIN_LEN:
                     probs[EOS] = 0
                     probs[END] = 0
+                
+                if args.temp != 1.0:
+                    probs /= args.temp
                 
                 try:
                     out = torch.multinomial(probs.float(), num_samples=1)[0]
@@ -244,6 +274,7 @@ Can you explain quantum computing?<|STK_SP|>
 
             # Really dumb way ig
             logits, state = model.forward_optimised(int(out), state, preprocess_only=False)
+            counter[int(out)] += 1
         print()
 
 
@@ -344,17 +375,19 @@ Can you explain quantum computing?<|STK_SP|>
     MIN_LEN = 100
     EOS = 0
     END = 50277
-    TRIALS = 1 if args.greedy else 3
+    TRIALS = 1 if args.greedy or args.temp == 0 else 3
     for _ in range(TRIALS):
         print("--- --- ---")
         tokens = tokens_src.clone()
+        counter = [0] * args.vocab_size
+
         for i in range(767):
             logits = model(tokens).float()
             logits = logits.view(-1, logits.size(-1))
             logits = logits[-1] # ???
             # print(logits, logits.shape)
             
-            if not args.greedy:
+            if not args.greedy and args.temp != 0:
                 probs = torch.nn.functional.softmax(logits, dim=-1)
                 # print(probs, probs.shape)
                 
@@ -370,6 +403,9 @@ Can you explain quantum computing?<|STK_SP|>
                 if i < MIN_LEN:
                     probs[EOS] = 0
                     probs[END] = 0
+
+                if args.temp != 1.0:
+                    probs /= args.temp
                 
                 try:
                     out = torch.multinomial(probs.float(), num_samples=1)[0]
@@ -385,5 +421,6 @@ Can you explain quantum computing?<|STK_SP|>
                 break
             tokens = torch.cat([tokens, torch.full((1, 1), out, device=tokens.device, dtype=tokens.dtype)], 1)
             print(tokenizer.decode(out), end='', flush=True)
+            counter[int(out)] += 1
             # break
         print()

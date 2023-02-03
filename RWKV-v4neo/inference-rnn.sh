@@ -1,1 +1,1 @@
-python inference.py --experiment_rnn --vocab_size 50278 --load_model_init "/d_drive/rwkv/lightning_logs/version_0/checkpoints/epoch-00-step-1500-val_loss-1.11.ckpt/epoch-00-step-1500-val_loss-1.11.ckpt" --ctx_len 1024 --n_layer 24 --n_embd 1024 --head_qk 0 --accelerator gpu --precision 16
+python inference.py --experiment_rnn --vocab_size 50278 --load_model_init "/d_drive/rwkv/lightning_logs/version_0/checkpoints/epoch-00-step-1500-val_loss-1.11.ckpt/epoch-00-step-1500-val_loss-1.11.ckpt" --ctx_len 1024 --n_layer 24 --n_embd 1024 --head_qk 0 --precision 32 $@
