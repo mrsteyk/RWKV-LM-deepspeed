@@ -5,6 +5,7 @@ import torch
 from safetensors.torch import save_file, load_file
 
 def convert_rnn(w, float_mode="fp32", rescale_layer=6):
+    from torch.nn import functional as F
     # RWKV_RESCALE_LAYER = 6
     # refine weights and send to correct device
     keys = list(w.keys())
@@ -36,6 +37,8 @@ def convert_rnn(w, float_mode="fp32", rescale_layer=6):
                 w[x] = w[x].half()
 
         w[x].requires_grad = False
+    
+    w["emb.weight"] = F.layer_norm(w["emb.weight"], (w["emb.weight"].shape[1],), weight=w["blocks.0.ln0.weight"], bias=w["blocks.0.ln0.bias"])
     return w
 
 def get_args():
