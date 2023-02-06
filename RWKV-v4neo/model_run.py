@@ -77,14 +77,17 @@ class RWKV_RNN(MyModule):
                         w[x] = w[x].half()
 
                 w[x].requires_grad = False
-                if args.RUN_DEVICE == 'cuda' and x != 'emb.weight':
+                if args.RUN_DEVICE == 'cuda':
                     w[x] = w[x].cuda()
 
-                if ('blocks.' not in x) or ('blocks.0.' in x):
+                if x == 'emb.weight' or 'ln0' in x:
+                    continue
+
+                if block_id == 0:
                     if print_need_newline:
                         print('\n', end = '')
                         print_need_newline = False
-                    print(x.ljust(40), str(w[x].dtype).replace('torch.', '').ljust(10), w[x].device)
+                    print(x.ljust(35), str(w[x].dtype).replace('torch.', '').ljust(10), w[x].device)
                 else:
                     print_need_newline = True
                     print('.', end = '', flush = True)
@@ -110,6 +113,10 @@ class RWKV_RNN(MyModule):
                         else:
                             setattr(here, xx[i], types.SimpleNamespace())
                     here = getattr(here, xx[i])
+
+        with torch.no_grad(): # precompute embedding
+            x = self.LN(self.w.emb.weight, self.w.blocks[0].ln0)
+            self.w.emb.weight = x.to(dtype=torch.float32 if self.FLOAT_MODE == "fp32" else torch.float16 if self.FLOAT_MODE == "fp16" else torch.bfloat16)
 
         self.eval()
         gc.collect()
@@ -205,8 +212,8 @@ class RWKV_RNN(MyModule):
                     state[5*i+4] -= 1e30
 
             for i in range(args.n_layer):
-                if i == 0:
-                    x = self.LN(x, w.blocks[i].ln0)
+                # if i == 0:
+                #     x = self.LN(x, w.blocks[i].ln0)
                 
                 ww = w.blocks[i].att
                 x = x + self.SA(self.LN(x, w.blocks[i].ln1), state, i, 
@@ -245,3 +252,7 @@ class RWKV_RNN(MyModule):
             if self.RUN_DEVICE == 'cuda':
                 x = x.cuda()
             return self.forward_raw(x, state, preprocess_only=preprocess_only)
+    
+    def forward_ln0(self, x, state, preprocess_only = False):
+        with torch.no_grad():
+           self.forward_raw(self.LN(x, self.w.blocks[0].ln0), state, preprocess_only=preprocess_only)
