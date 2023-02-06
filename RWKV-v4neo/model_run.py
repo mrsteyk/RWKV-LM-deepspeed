@@ -116,11 +116,15 @@ class RWKV_RNN(MyModule):
 
         with torch.no_grad(): # precompute embedding
             x = self.LN(self.w.emb.weight, self.w.blocks[0].ln0)
-            self.w.emb.weight = x.to(dtype=torch.float32 if self.FLOAT_MODE == "fp32" else torch.float16 if self.FLOAT_MODE == "fp16" else torch.bfloat16)
+            self.w.emb.weight = x.to(dtype=self.dtype)
 
         self.eval()
         gc.collect()
         torch.cuda.empty_cache()
+    
+    @property
+    def dtype(self):
+        return torch.float32 if self.FLOAT_MODE == "fp32" else torch.float16 if self.FLOAT_MODE == "fp16" else torch.bfloat16
 
     def LN(self, x, w):
         return F.layer_norm(x, (self.args.n_embd,), weight=w.weight, bias=w.bias)
@@ -129,18 +133,10 @@ class RWKV_RNN(MyModule):
 
     @MyFunction
     def FF(self, x, state, i:int, time_mix_k, time_mix_r, kw, vw, rw):
-        if self.FLOAT_MODE == "bf16":
-            xk = x * time_mix_k + state[5*i+0].type(torch.bfloat16) * (1 - time_mix_k)
-            xr = x * time_mix_r + state[5*i+0].type(torch.bfloat16) * (1 - time_mix_r)
-            state[5*i+0] = x.float()
-        elif self.FLOAT_MODE == "fp16":
-            xk = x * time_mix_k + state[5*i+0].half() * (1 - time_mix_k)
-            xr = x * time_mix_r + state[5*i+0].half() * (1 - time_mix_r)
-            state[5*i+0] = x.float()            
-        else:
-            xk = x * time_mix_k + state[5*i+0] * (1 - time_mix_k)
-            xr = x * time_mix_r + state[5*i+0] * (1 - time_mix_r)
-            state[5*i+0] = x
+        xx = state[5*i+0].type(self.dtype)
+        xk = x * time_mix_k + xx * (1 - time_mix_k)
+        xr = x * time_mix_r + xx * (1 - time_mix_r)
+        state[5*i+0] = x.float()
 
         r = torch.sigmoid(rw @ xr)
         k = torch.square(torch.relu(kw @ xk))
@@ -150,54 +146,33 @@ class RWKV_RNN(MyModule):
 
     @MyFunction
     def SA(self, x, state, i:int, time_mix_k, time_mix_v, time_mix_r, time_first, time_decay, kw, vw, rw, ow):
-        if self.FLOAT_MODE == "bf16":
-            xk = x * time_mix_k + state[5*i+1].type(torch.bfloat16) * (1 - time_mix_k)
-            xv = x * time_mix_v + state[5*i+1].type(torch.bfloat16) * (1 - time_mix_v)
-            xr = x * time_mix_r + state[5*i+1].type(torch.bfloat16) * (1 - time_mix_r)
-            state[5*i+1] = x.float()
-        elif self.FLOAT_MODE == "fp16":
-            xk = x * time_mix_k + state[5*i+1].half() * (1 - time_mix_k)
-            xv = x * time_mix_v + state[5*i+1].half() * (1 - time_mix_v)
-            xr = x * time_mix_r + state[5*i+1].half() * (1 - time_mix_r)
-            state[5*i+1] = x.float()            
-        else:
-            xk = x * time_mix_k + state[5*i+1] * (1 - time_mix_k)
-            xv = x * time_mix_v + state[5*i+1] * (1 - time_mix_v)
-            xr = x * time_mix_r + state[5*i+1] * (1 - time_mix_r)
-            state[5*i+1] = x
+        xx = state[5*i+1].type(self.dtype)
+        xk = x * time_mix_k + xx * (1 - time_mix_k)
+        xv = x * time_mix_v + xx * (1 - time_mix_v)
+        xr = x * time_mix_r + xx * (1 - time_mix_r)
+        state[5*i+1] = x.float()
 
         r = torch.sigmoid(rw @ xr)
-        k = kw @ xk
-        v = vw @ xv
+        k = (kw @ xk).float()
+        v = (vw @ xv).float()
 
-        if '16' in self.FLOAT_MODE:
-            kk = k.float()
-            vv = v.float()
-        else:
-            kk = k
-            vv = v
         aa = state[5*i+2]
         bb = state[5*i+3]
         pp = state[5*i+4]
-        ww = time_first + kk
+        ww = time_first + k
         p = torch.maximum(pp, ww)
         e1 = torch.exp(pp - p)
         e2 = torch.exp(ww - p)
-        a = e1 * aa + e2 * vv
+        a = e1 * aa + e2 * v
         b = e1 * bb + e2
         ww = pp + time_decay
-        p = torch.maximum(ww, kk)
+        p = torch.maximum(ww, k)
         e1 = torch.exp(ww - p)
-        e2 = torch.exp(kk - p)
-        state[5*i+2] = e1 * aa + e2 * vv
+        e2 = torch.exp(k - p)
+        state[5*i+2] = e1 * aa + e2 * v
         state[5*i+3] = e1 * bb + e2
         state[5*i+4] = p
-        if self.FLOAT_MODE == "bf16":
-            wkv = (a / b).type(torch.bfloat16)
-        elif self.FLOAT_MODE == "fp16":
-            wkv = (a / b).half()
-        else:
-            wkv = a / b
+        wkv = (a / b).type(self.dtype)
         
         return ow @ (r * wkv)
 
