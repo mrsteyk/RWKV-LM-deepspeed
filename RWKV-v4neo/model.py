@@ -406,7 +406,7 @@ class RWKV(pl.LightningModule):
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
         ret = L2Wrap.apply(loss, logits)
-        self.log('train_loss', ret, prog_bar=True, logger=True)
+        self.log('train/loss', ret, prog_bar=True, logger=True)
 
         return ret
 
@@ -417,7 +417,11 @@ class RWKV(pl.LightningModule):
         val_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
         ret = L2Wrap.apply(val_loss, logits)
-        self.log("val_loss", ret, prog_bar=True, sync_dist=True, logger=True)
+        self.log("val/loss", ret, prog_bar=True, logger=True)
+
+        labels_hat = torch.argmax(logits, dim=1)
+        val_acc = torch.sum(targets == labels_hat).item() / (len(targets) * 1.0)
+        self.log("val/acc", val_acc, prog_bar=True, logger=True)
 
     def generate_init_weight(self):
         print(

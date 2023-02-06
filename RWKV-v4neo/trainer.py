@@ -131,6 +131,8 @@ def get_argparser():
 
     return parser
 
+from utils import load_checkpoint
+
 if __name__ == "__main__":
     args = get_argparser().parse_args()
     args.betas = (args.beta1, args.beta2)
@@ -155,23 +157,18 @@ if __name__ == "__main__":
         # load_state_dict_from_zero_checkpoint(model, args.load_model_cont)
         pass
     elif args.load_model_init != '':
-        if os.path.isdir(args.load_model_init):
-            load_state_dict_from_zero_checkpoint(model, args.load_model_init)
-            model.cpu()
-            if args.precision == 16:
-                model.half()
-            elif args.precision == "bf16":
-                model.bfloat16()
-        else:
-            d = torch.load(args.load_model_init, map_location='cpu')
-            if list(d.keys())[0].startswith("_forward_module."):
-                d = {n[len("_forward_module."):]: d[n] for n in d.keys()}
-            model.load_state_dict(d)
-        # model = M.RWKV(args).load_from_checkpoint(args.load_model_init)
+        model = load_checkpoint(args.load_model_init, model)
     else:
         # TODO?
         # model = M.RWKV(args)
         model.generate_init_weight()
+    
+    if args.precision == 16:
+        model = model.half()
+    elif args.precision == "bf16":
+        model = model.bfloat16()
+    else:
+        model = model.float()
 
     if args.vocab_size_delta > 0:
         new_vocab_size = args.vocab_size + args.vocab_size_delta
