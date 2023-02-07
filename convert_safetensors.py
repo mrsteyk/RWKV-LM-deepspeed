@@ -56,7 +56,7 @@ if __name__ == "__main__":
     args = get_args()
     if os.path.isdir(args.input_checkpoint):
         from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
-        d = get_fp32_state_dict_from_zero_checkpoint(args.load_model_init, tag=args.zero_tag)
+        d = get_fp32_state_dict_from_zero_checkpoint(args.input_checkpoint, tag=args.zero_tag)
     else:
         if args.input_checkpoint.endswith(".safetensors"):
             d = load_file(args.input_checkpoint)
