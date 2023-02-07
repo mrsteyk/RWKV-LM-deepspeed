@@ -64,6 +64,7 @@ if __name__ == "__main__":
             d = torch.load(args.input_checkpoint, map_location='cpu')
     if list(d.keys())[0].startswith("_forward_module."):
         d = {n[len("_forward_module."):]: d[n] for n in d.keys()}
+    
     if args.output is None:
         args.output = f"{os.path.splitext(args.input_checkpoint)[0]}.safetensors"
     elif not args.output.endswith("safetensors"):
@@ -71,10 +72,13 @@ if __name__ == "__main__":
     
     if not args.rnn:
         if args.fp16:
+            print("fp16")
             d = {k: v.half() for k, v in d.items()}
         elif args.bf16:
+            print("bf16")
             d = {k: v.bfloat16() for k, v in d.items()}
         else:
+            print("fp32")
             d = {k: v.float() for k, v in d.items()}
     else:
         d = convert_rnn(d, float_mode="fp16" if args.fp16 else "bf16" if args.bf16 else "fp32")
