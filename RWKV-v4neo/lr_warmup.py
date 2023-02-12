@@ -15,7 +15,8 @@ class LearningWarmUpCallback(pl.Callback):
 
         # LR schedule
         w_step = args.warmup_steps
-        if args.lr_final == args.lr_init or args.epoch_count == 0:
+        # if args.lr_final == args.lr_init or args.epoch_count == 0:
+        if True:
             lr = args.lr_init
         else:
             decay_step = real_step - args.my_pile_edecay * args.epoch_steps

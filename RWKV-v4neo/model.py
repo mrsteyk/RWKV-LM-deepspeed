@@ -18,7 +18,10 @@ from pytorch_lightning.utilities import rank_zero_info
 # CUDA Kernel
 ########################################################################################################
 
-T_MAX = int(os.environ["RWKV_T_MAX"])  # TAKES LOTS OF VRAM!
+T_SPLIT = int(os.environ["RWKV_T_SPLIT"])
+T_MAX_RAW = int(os.environ["RWKV_T_MAX"])  # TAKES LOTS OF VRAM!
+assert T_SPLIT == 0 or (T_MAX_RAW % T_SPLIT) == 0, f"T_SPLIT must divide T_MAX_RAW without the remainder, {T_MAX_RAW}%{T_SPLIT}={T_MAX_RAW % T_SPLIT}"
+T_MAX = T_MAX_RAW if T_SPLIT == 0 else T_MAX_RAW // T_SPLIT
 # it's possible to go beyond CUDA limitations if you slice the ctx and pass the hidden state in each slice
 
 from torch.utils.cpp_extension import load
@@ -88,6 +91,70 @@ class WKV(torch.autograd.Function):
 def RUN_CUDA(B, T, C, w, u, k, v):
     return WKV.apply(B, T, C, w, u, k, v)
 
+# Look in CUDA kernel source for credits
+class WKV_part(torch.autograd.Function):
+    def init_state(B, C):
+        state = torch.zeros((B, C, 3), device='cuda')
+        state[:,:,2] -= 1e38
+        return state.cuda()
+
+    @staticmethod
+    def forward(ctx, B, T, C, w, u, k, v, last_state):
+        ctx.B = B
+        ctx.T = T
+        ctx.C = C
+        # assert T <= T_MAX
+        w = -torch.exp(w.float().contiguous())
+        u = u.float().contiguous()
+        k = k.float().contiguous()
+        v = v.float().contiguous()
+        last_state = last_state.contiguous()
+        y = torch.empty((B, T, C), device='cuda', memory_format=torch.contiguous_format)
+        ctx.save_for_backward(w, u, k, v, last_state)
+        new_state = torch.empty((B, C, 3), device='cuda', memory_format=torch.contiguous_format)
+        # torch::Tensor &last_state, torch::Tensor &new_state
+        wkv_cuda.forward2(B, T, C, w, u, k, v, y, last_state, new_state)
+        if "32" in os.environ["RWKV_FLOAT_MODE"]:
+            return y, new_state
+        elif os.environ["RWKV_FLOAT_MODE"] == 'fp16':
+            return y.half(), new_state
+        else:
+            return y.blfloat16(), new_state
+
+    @staticmethod
+    def backward(ctx, gy, gnew_state):
+        B = ctx.B
+        T = ctx.T
+        C = ctx.C
+        # assert T <= T_MAX
+        w, u, k, v, last_state = ctx.saved_tensors
+        gw = torch.zeros((B, C), device='cuda')
+        gu = torch.zeros((B, C), device='cuda')
+        gk = torch.zeros((B, T, C), device='cuda')
+        gv = torch.zeros((B, T, C), device='cuda')
+        glast_state = torch.zeros((B, C, 3), device='cuda')
+        # torch::Tensor &last_state, torch::Tensor &gnew_state, torch::Tensor &glast_state
+        wkv_cuda.backward2(B, T, C, w, u, k, v, gy.float().contiguous(), gw, gu, gk, gv, last_state, gnew_state.contiguous(), glast_state)
+        gw = torch.sum(gw, dim=0)
+        gu = torch.sum(gu, dim=0)
+        if "32" in os.environ["RWKV_FLOAT_MODE"]:
+            return (None, None, None, gw, gu, gk, gv, glast_state)
+        elif os.environ["RWKV_FLOAT_MODE"] == 'fp16':
+            return (None, None, None, gw.half(), gu.half(), gk.half(), gv.half(), glast_state)
+        else:
+            return (None, None, None, gw.bfloat16(), gu.bfloat16(), gk.bfloat16(), gv.bfloat16(), glast_state)
+
+def RUN_CUDA2(B, T, C, w, u, k, v):
+    # parts = 4
+    # assert(T%T_SPLIT == 0)
+    t = T//T_SPLIT
+    y_list = []
+    state = WKV_part.init_state(B, C)
+    for i in range(T_SPLIT):
+        y, state = WKV_part.apply(B, t, C, w.cuda(), u.cuda(), k[:,t*i:t*(i+1),:].cuda(), v[:,t*i:t*(i+1),:].cuda(), state)
+        y_list.append(y)
+    return torch.cat(y_list, dim=1)
+
 
 ########################################################################################################
 # RWKV: RWKV Time-mix + RWKV Channel-mix
@@ -101,7 +168,7 @@ class RWKV_TimeMix(nn.Module):
         self.layer_id = layer_id
         self.ctx_len = args.ctx_len
         self.n_embd = args.n_embd
-        attn_sz = args.n_embd
+        attn_sz = args.n_embd if args.dim_att == 0  else args.dim_att
 
         with torch.no_grad():  # fancy init
             ratio_0_to_1 = layer_id / (args.n_layer - 1)  # 0 to 1
@@ -152,9 +219,12 @@ class RWKV_TimeMix(nn.Module):
     def forward(self, x):
         B, T, C = x.size()  # x = (Batch,Time,Channel)
 
+        if self.args.dim_att > 0:
+            C = self.args.dim_att
+
         sr, k, v = self.jit_func(x)
 
-        rwkv = sr * RUN_CUDA(B, T, C, self.time_decay, self.time_first, k, v)
+        rwkv = sr * (RUN_CUDA(B, T, C, self.time_decay, self.time_first, k, v) if T_SPLIT == 0 else RUN_CUDA2(B, T, C, self.time_decay, self.time_first, k, v))
         rwkv = self.output(rwkv)
         return rwkv
 
@@ -176,7 +246,7 @@ class RWKV_ChannelMix(nn.Module):
             self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
 
-        hidden_sz = 4 * args.n_embd
+        hidden_sz = (4 * args.n_embd) if args.dim_ffn == 0 else args.dim_ffn
         self.key = nn.Linear(args.n_embd, hidden_sz, bias=False)
         self.receptance = nn.Linear(args.n_embd, args.n_embd, bias=False)
         self.value = nn.Linear(hidden_sz, args.n_embd, bias=False)
@@ -419,9 +489,9 @@ class RWKV(pl.LightningModule):
         ret = L2Wrap.apply(val_loss, logits)
         self.log("val/loss", ret, prog_bar=True, logger=True)
 
-        labels_hat = torch.argmax(logits, dim=1)
-        val_acc = torch.sum(targets == labels_hat).item() / (len(targets) * 1.0)
-        self.log("val/acc", val_acc, prog_bar=True, logger=True)
+        # labels_hat = torch.argmax(logits, dim=1)
+        # val_acc = torch.sum(targets == labels_hat).item() / (len(targets) * 1.0)
+        # self.log("val/acc", val_acc, prog_bar=True, logger=True)
 
     def generate_init_weight(self):
         print(
@@ -473,7 +543,7 @@ class RWKV(pl.LightningModule):
                     nn.init.orthogonal_(m[n], gain=gain * scale)
 
             m[n] = m[n].cpu()
-            if self.args.precision == "16":
+            if str(self.args.precision) == "16":
                 m[n] = m[n].half()
             elif self.args.precision == "bf16":
                 m[n] = m[n].bfloat16()

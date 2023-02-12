@@ -18,6 +18,21 @@ def get_argparser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "--dim_att",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--dim_ffn",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--ctx_part",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
         "--experiment_dataloader",
         action='store_true',
         default=False,
@@ -145,6 +160,7 @@ if __name__ == "__main__":
     else:
         os.environ["RWKV_FLOAT_MODE"] = str(args.precision)
     os.environ["RWKV_T_MAX"] = str(args.ctx_len + (args.soft_emb_tokens if args.soft_emb_tune else 0))
+    os.environ["RWKV_T_SPLIT"] = str(args.ctx_part)
 
     os.environ["RWKVK_CUDA_FP16"] = "1" if args.experiment_fp16 else "0"
 
@@ -193,7 +209,7 @@ if __name__ == "__main__":
         # save_weights_only=True,
         save_top_k=3,
         mode='min',
-        monitor="val_loss",
+        monitor="val/loss",
         auto_insert_metric_name=False,
         every_n_train_steps=None if not args.experiment_dataloader else 300,
     )
@@ -219,8 +235,8 @@ if __name__ == "__main__":
     train_data = dataset.MyDataSet(args)
 
     # TODO(mrsteyk): Allow different validation files
-    # use 20% of training data for validation
-    train_set_size = int(len(train_data) * 0.8)
+    # use 10% of training data for validation
+    train_set_size = int(len(train_data) * 0.9)
     valid_set_size = len(train_data) - train_set_size
 
     # split the train set into two
