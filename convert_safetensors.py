@@ -1,5 +1,6 @@
 import argparse
 import os
+import gc
 
 import torch
 from safetensors.torch import save_file, load_file
@@ -64,12 +65,15 @@ if __name__ == "__main__":
             d = torch.load(args.input_checkpoint, map_location='cpu')
     if list(d.keys())[0].startswith("_forward_module."):
         d = {n[len("_forward_module."):]: d[n] for n in d.keys()}
+    gc.collect()
+    print("loaded")
     
     if args.output is None:
         args.output = f"{os.path.splitext(args.input_checkpoint)[0]}.safetensors"
     elif not args.output.endswith("safetensors"):
         args.output = f"{args.output}s" if args.output.endswith("safetensor") else f"{args.output}.safetensors"
     
+    print("converting")
     if not args.rnn:
         if args.fp16:
             print("fp16")
@@ -83,4 +87,6 @@ if __name__ == "__main__":
     else:
         d = convert_rnn(d, float_mode="fp16" if args.fp16 else "bf16" if args.bf16 else "fp32")
 
+    gc.collect()
+    print(f"saving {args.output}")
     save_file(d, args.output)
