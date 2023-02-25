@@ -15,12 +15,13 @@ class LearningWarmUpCallback(pl.Callback):
 
         # LR schedule
         w_step = args.warmup_steps
+        # The only thing left is how would I count steps? Perhaps make a new argument for amount of decay steps?
         # if args.lr_final == args.lr_init or args.epoch_count == 0:
         if True:
             lr = args.lr_init
         else:
-            decay_step = real_step - args.my_pile_edecay * args.epoch_steps
-            decay_total = (args.epoch_count - args.my_pile_edecay) * args.epoch_steps
+            decay_step = real_step # - args.my_pile_edecay * args.epoch_steps # I hate all the makeshift bs
+            decay_total = (args.epoch_count) * args.epoch_steps
             progress = (decay_step - w_step + 1) / (decay_total - w_step)
             progress = min(1, max(0, progress))
 

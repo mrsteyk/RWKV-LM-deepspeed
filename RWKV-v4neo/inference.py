@@ -298,6 +298,9 @@ if __name__ == "__main__":
 
     # Now we can import the model after setting that stupid T max envvar
     import model as M
+    # TODO:
+    args.dim_att = 0
+    args.dim_ffn = 0
     model = M.RWKV(args)
     # model = None
 
