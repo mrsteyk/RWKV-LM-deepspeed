@@ -7,3 +7,4 @@ lightning_logs
 *.npy
 *.ckpt
 *.safetensors
+out/
